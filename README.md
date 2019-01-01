@@ -1,12 +1,11 @@
 ## Communications between nameko microservices and non-python microservices asynchronously.
 
-In my last projects I've playing with microservices. Mostly written in Python. Months ago I discovered nameko. It's great. I've written a couple of posts. Nameko relies on RabbitMQ and basically does the common operations that I normally do in a very clean way. That's cool but I sometimes need to work with other services (micro or macro) that aren't written in python. With nameko I can create easily http gateways. And also we can send http requests from our nameko microservices to the rest of the world. It works but it's synchronous. It synchronous fit to your needs perfect, but sometimes we need asynchronous. What can we do?
+In my last projects I've playing with microservices. Mostly written in Python. Months ago I discovered nameko. It's great. I've written a couple of posts about it. Nameko relies on RabbitMQ and basically it does the common operations that I normally do when I work with microservices in a very clean way. That's cool but I sometimes need to work with other services (micro or macro) that they aren't written in Python. With nameko I can create easily http gateways. And also we can send http requests from our nameko microservices to the rest of the world. It works but it's synchronous. If synchronous way fits to your needs it's perfect, but sometimes we need asynchronous way. What can we do?
 
-Since nameko relies on RabbitMQ we can use nameko's queues and exchanges. It should be possible but afaik nameko encapsulates its messages with one kind of algorithm that I don't understand. Years ago I've tried to do one kind of reverse engineering to figure out how to encode the messages. But now I'm getting older and I don't want to spend so much time trying to discover it. Let me show you how I've done it
+Since nameko relies on RabbitMQ we can use nameko's queues and exchanges outside nameko. It should be possible but afaik nameko encapsulates its messages with one kind of encoder that I don't understand. Years ago I've tried to do one kind of reverse engineering to figure out how to encode those messages. But now I'm getting older and I don't want to spend so much time trying to discover it. Let me show you how I've done it
 
 ### From nameko to another services
-
-Here we only need to send one RabbitMQ message. To do it I've created a simple dependency Providers
+Here we only need to send one RabbitMQ message. To do it, I've created a simple dependency Provider in Nameko
 
 ```python
 from nameko.extensions import DependencyProvider
@@ -46,7 +45,7 @@ class RabbitService(DependencyProvider):
 
 ```
 
-Here a simple example of nameko microservice that send a meesage to one queue each 3 seconds
+Here a simple example of nameko microservice that sends a meesage to one queue each 3 seconds
 
 ```python
 from nameko.timer import timer
@@ -73,7 +72,7 @@ class Timer:
 
 In the opposite way I've found two possible solutions. 
 
-The first on is create a simple RabbitMQ consumer listening to one queue acting as a proxy and redirecting messages to nameko.
+The first one is to create a simple RabbitMQ consumer listening to one queue (acting as a proxy) and redirecting messages to nameko.
  
 ```python
 import pika
@@ -108,56 +107,8 @@ channel.basic_qos(prefetch_count=1)
 channel.start_consuming()
 ```
 
-```python
-from nameko.extensions import Entrypoint
-import pika
-from functools import partial
-import os
+The other way is using a Nameko Entrypoint
 
-
-class QueueListener(Entrypoint):
-    channel = None
-
-    def __init__(self, queue, **kwargs):
-        self.queue = queue
-        super(QueueListener, self).__init__(**kwargs)
-
-    def setup(self):
-        pass
-
-    def start(self):
-        self.container.spawn_managed_thread(self.run, identifier="QueueListener.run")
-
-    def run(self):
-        broker_connection = pika.BlockingConnection(pika.URLParameters(os.getenv('AMQP_URI')))
-
-        channel = broker_connection.channel()
-        channel.queue_declare(queue=self.queue)
-
-        channel.basic_consume(consumer_callback=self.handle_message,
-                              queue=self.queue,
-                              no_ack=False)
-        channel.basic_qos(prefetch_count=1)
-        channel.start_consuming()
-
-    def handle_message(self, ch, method, properties, body):
-        handle_result = partial(self.handle_result)
-        ch.basic_ack(delivery_tag=method.delivery_tag)
-        args = (body,)
-        kwargs = {}
-
-        self.container.spawn_worker(
-            self, args, kwargs, handle_result=handle_result
-        )
-
-    def handle_result(self, worker_ctx, result, exc_info):
-        return result, exc_info
-
-
-listener = QueueListener.decorator
-```
-
-The other way is using a Nameko entrypoint
 ```python
 from nameko.extensions import Entrypoint
 import pika
@@ -208,6 +159,7 @@ listener = QueueListener.decorator
 ```
 
 Now we can use a nameko service listening to the queue via our nameko entrypoint
+
 ```python
 from nameko.events import EventDispatcher
 from ext.entrypoint import listener
